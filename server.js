@@ -26,13 +26,17 @@ const signupSchema = new mongoose.Schema(
 
 const Signup = mongoose.model("Signup", signupSchema);
 
+const axios = require("axios");
+
 app.post("/signup", async (req, res) => {
   try {
     const { name, activity } = req.body;
     if (!name || !activity)
       return res.status(400).json({ error: "กรุณากรอกข้อมูลให้ครบ" });
 
-    const createdBy = req.ip; // ดึง IP address ของผู้ที่ส่งคำขอ
+    // ดึง IP address จาก ipify API
+    const ipResponse = await axios.get("https://api.ipify.org?format=json");
+    const createdBy = ipResponse.data.ip; // ดึง IP จากผลลัพธ์
 
     const newSignup = new Signup({ name, activity, createdBy });
     await newSignup.save();
@@ -78,9 +82,15 @@ app.delete("/delete/:id", async (req, res) => {
 });
 
 // เส้นทางใหม่เพื่อดึง IP address ของผู้ใช้
-app.get("/getUserIP", (req, res) => {
-  const ip = req.ip; // ดึง IP address ของผู้ใช้จาก request
-  res.json({ createdBy: ip });
+app.get("/getUserIP", async (req, res) => {
+  try {
+    // ดึง IP address ของผู้ใช้จาก ipify API
+    const ipResponse = await axios.get("https://api.ipify.org?format=json");
+    res.json({ createdBy: ipResponse.data.ip });
+  } catch (error) {
+    console.error("Error fetching IP:", error);
+    res.status(500).json({ error: "ไม่สามารถดึง IP ได้" });
+  }
 });
 
 // ✅ เริ่มเซิร์ฟเวอร์
