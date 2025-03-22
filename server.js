@@ -1,11 +1,14 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const axios = require("axios");
+const cron = require("node-cron");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
+// ✅ เชื่อมต่อ MongoDB
 mongoose
   .connect("mongodb+srv://loprommy55:1234@khan.hoqrd.mongodb.net/signup", {
     useNewUrlParser: true,
@@ -14,29 +17,40 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
+// ✅ สร้าง Schema และ Model
 const signupSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     activity: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now, expires: 86400 },
-    createdBy: { type: String, required: true }, // เก็บ IP หรือข้อมูลผู้เพิ่ม
+    createdAt: { type: Date, default: Date.now },
+    createdBy: { type: String, required: true },
   },
   { timestamps: true }
 );
 
 const Signup = mongoose.model("Signup", signupSchema);
 
-const axios = require("axios");
+// ✅ ตั้งเวลาให้ลบเอกสารทุกวันตอนเที่ยงคืน
+cron.schedule("0 0 * * *", async () => {
+  try {
+    console.log("🕛 กำลังลบเอกสารที่หมดอายุ...");
+    const result = await Signup.deleteMany({ createdAt: { $lt: new Date() } });
+    console.log(`🗑️ ลบไปแล้ว ${result.deletedCount} รายการ`);
+  } catch (error) {
+    console.error("❌ เกิดข้อผิดพลาดในการลบเอกสาร:", error);
+  }
+});
 
+// ✅ ลงชื่อเข้าใช้
 app.post("/signup", async (req, res) => {
   try {
     const { name, activity } = req.body;
     if (!name || !activity)
       return res.status(400).json({ error: "กรุณากรอกข้อมูลให้ครบ" });
 
-    // ดึง IP address จาก ipify API
+    // ดึง IP address ของผู้ใช้
     const ipResponse = await axios.get("https://api.ipify.org?format=json");
-    const createdBy = ipResponse.data.ip; // ดึง IP จากผลลัพธ์
+    const createdBy = ipResponse.data.ip;
 
     const newSignup = new Signup({ name, activity, createdBy });
     await newSignup.save();
@@ -46,6 +60,7 @@ app.post("/signup", async (req, res) => {
   }
 });
 
+// ✅ ดึงข้อมูลผู้เข้าร่วมทั้งหมด
 app.get("/participants", async (req, res) => {
   try {
     const participants = await Signup.find().sort({ createdAt: -1 });
@@ -55,25 +70,21 @@ app.get("/participants", async (req, res) => {
   }
 });
 
-// ลบข้อมูลที่ผู้เพิ่มเอง
+// ✅ ลบข้อมูลที่ผู้เพิ่มเอง
 app.delete("/delete/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { createdBy } = req.body; // ส่งค่า createdBy จาก frontend
+    const { createdBy } = req.body; // รับค่า createdBy จาก frontend
 
-    // ค้นหาข้อมูลที่ต้องการลบ
+    // ค้นหาข้อมูล
     const signup = await Signup.findById(id);
+    if (!signup) return res.status(404).json({ error: "ไม่พบข้อมูลที่ต้องการลบ" });
 
-    if (!signup) {
-      return res.status(404).json({ error: "ไม่พบข้อมูลที่ต้องการลบ" });
-    }
-
-    // ตรวจสอบว่า "ผู้ที่ขอลบ" เป็นผู้เพิ่มข้อมูลจริงๆ หรือไม่
-    if (signup.createdBy !== createdBy) {
+    // ตรวจสอบสิทธิ์การลบ
+    if (signup.createdBy !== createdBy)
       return res.status(403).json({ error: "คุณไม่มีสิทธิ์ลบข้อมูลนี้" });
-    }
 
-    // ลบข้อมูลที่ตรงกับ ID
+    // ลบข้อมูล
     await Signup.findByIdAndDelete(id);
     res.json({ message: "✅ ลบข้อมูลสำเร็จ!" });
   } catch (error) {
@@ -81,15 +92,13 @@ app.delete("/delete/:id", async (req, res) => {
   }
 });
 
-// เส้นทางใหม่เพื่อดึง IP address ของผู้ใช้
+// ✅ ดึง IP address ของผู้ใช้
 app.get("/getUserIP", async (req, res) => {
   try {
-    // ดึง IP address ของผู้ใช้จาก ipify API
     const ipResponse = await axios.get("https://api.ipify.org?format=json");
     res.json({ createdBy: ipResponse.data.ip });
   } catch (error) {
-    console.error("Error fetching IP:", error);
-    res.status(500).json({ error: "ไม่สามารถดึง IP ได้" });
+    res.status(500).json({ error: "❌ ไม่สามารถดึง IP ได้" });
   }
 });
 
